@@ -21,6 +21,8 @@ func main() {
 	// not copy a waitgroup if you are passing it around in the program, you
 	// should pass pointer instead
 	wg := &sync.WaitGroup{}
+
+	m := &sync.Mutex{}
 	for i := 0; i < 10; i++ {
 
 		id := randNum.Intn(10) + 1
@@ -38,21 +40,21 @@ func main() {
 		// wg.Add(1)
 		wg.Add(2)
 		// wg *sync.WaitGroup -> pointer to the waitGroup object.
-		go func(id int, wg *sync.WaitGroup) {
-			if b, ok := queryCache(id); ok {
+		go func(id int, wg *sync.WaitGroup, m *sync.Mutex) {
+			if b, ok := queryCache(id, m); ok {
 				fmt.Println("from cache")
 				fmt.Println(b)
 			}
 			// This means that once concurrent task is completed.
 			wg.Done()
-		}(id, wg)
-		go func(id int, wg *sync.WaitGroup) {
-			if b, ok := queryDatabase(id); ok {
+		}(id, wg, m)
+		go func(id int, wg *sync.WaitGroup, m *sync.Mutex) {
+			if b, ok := queryDatabase(id, m); ok {
 				fmt.Println("from database")
 				fmt.Println(b)
 			}
 			wg.Done()
-		}(id, wg)
+		}(id, wg, m)
 
 		// fmt.Printf("Book not found with id: '%v'", id)
 
@@ -71,7 +73,7 @@ func main() {
 		// So as long as we try to pause our main program with time.Sleep we will
 		// be able to see the output and give the time for our go routines to complete.
 
-		// time.Sleep(150 * time.Millisecond)
+		time.Sleep(150 * time.Millisecond)
 	}
 	// This sleep call is for the go routines to finish
 	// time.Sleep(2 * time.Second)
@@ -80,16 +82,24 @@ func main() {
 	wg.Wait()
 }
 
-func queryCache(id int) (Book, bool) {
+func queryCache(id int, m *sync.Mutex) (Book, bool) {
+	// If I call Lock, then whatever called that lock, whichever goroutine locked
+	// that, now owns the mutex. It's now controlling the mutex. So nothing else
+	// is going to be able to access protected code until that owning goroutine
+	// calls Unlock.
+	m.Lock()
 	b, ok := cache[id]
+	m.Unlock()
 	return b, ok
 }
 
-func queryDatabase(id int) (Book, bool) {
+func queryDatabase(id int, m *sync.Mutex) (Book, bool) {
 	time.Sleep(100 * time.Millisecond)
 	for _, b := range books {
 		if b.ID == id {
-			// cache[id] = b
+			m.Lock()
+			cache[id] = b
+			m.Unlock()
 			return b, true
 		}
 	}
@@ -108,3 +118,19 @@ func queryDatabase(id int) (Book, bool) {
 // allow us to protect memory that's shared between multiple goroutines to
 // ensure that we have control over what's accessing that shared memory at a
 // given time.
+
+// MUTEX -> Mutual Exclusion lock
+// a mutex can be used to protect a portion of your code so that only one task
+// or only the owner of the mutex lock can access that code. So we can use
+// that for to protect memory access. So we can lock the mutex, access the
+// memory, and then unlock the mutex, ensuring that only one task can access
+// that code at one time.
+
+// Racing condition in our code:
+// So in our code there are places where we are reading the cache at the same
+// time we were trying to write the cache. line 84 b, ok := cache[id], here we
+// are trying to read the data from the cache. and at line 92 cache[id] = b,
+// here we are writing to cache. So line 84 is racing with line 92, we  were
+// reading the cache at the same time we were trying to write the cache.
+
+// use go run --race . -> race flag

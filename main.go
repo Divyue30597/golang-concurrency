@@ -22,7 +22,7 @@ func main() {
 	// should pass pointer instead
 	wg := &sync.WaitGroup{}
 
-	m := &sync.Mutex{}
+	m := &sync.RWMutex{}
 	for i := 0; i < 10; i++ {
 
 		id := randNum.Intn(10) + 1
@@ -40,7 +40,7 @@ func main() {
 		// wg.Add(1)
 		wg.Add(2)
 		// wg *sync.WaitGroup -> pointer to the waitGroup object.
-		go func(id int, wg *sync.WaitGroup, m *sync.Mutex) {
+		go func(id int, wg *sync.WaitGroup, m *sync.RWMutex) {
 			if b, ok := queryCache(id, m); ok {
 				fmt.Println("from cache")
 				fmt.Println(b)
@@ -48,7 +48,7 @@ func main() {
 			// This means that once concurrent task is completed.
 			wg.Done()
 		}(id, wg, m)
-		go func(id int, wg *sync.WaitGroup, m *sync.Mutex) {
+		go func(id int, wg *sync.WaitGroup, m *sync.RWMutex) {
 			if b, ok := queryDatabase(id, m); ok {
 				fmt.Println("from database")
 				fmt.Println(b)
@@ -82,18 +82,18 @@ func main() {
 	wg.Wait()
 }
 
-func queryCache(id int, m *sync.Mutex) (Book, bool) {
+func queryCache(id int, m *sync.RWMutex) (Book, bool) {
 	// If I call Lock, then whatever called that lock, whichever goroutine locked
 	// that, now owns the mutex. It's now controlling the mutex. So nothing else
 	// is going to be able to access protected code until that owning goroutine
 	// calls Unlock.
-	m.Lock()
+	m.RLock()
 	b, ok := cache[id]
-	m.Unlock()
+	m.RUnlock()
 	return b, ok
 }
 
-func queryDatabase(id int, m *sync.Mutex) (Book, bool) {
+func queryDatabase(id int, m *sync.RWMutex) (Book, bool) {
 	time.Sleep(100 * time.Millisecond)
 	for _, b := range books {
 		if b.ID == id {
@@ -134,3 +134,25 @@ func queryDatabase(id int, m *sync.Mutex) (Book, bool) {
 // reading the cache at the same time we were trying to write the cache.
 
 // use go run --race . -> race flag
+
+// use the RWMutex if the requirement is Reading the cache more
+// Since in real world scenarios we will be reading more from the cache.
+
+// we may have locked things down a little bit too much because while writing
+// to the cache at the same time that I'm reading from it is bad, having
+// multiple goroutines read from the cache at the same time because we're not
+// mutating the memory, we're just inspecting it. So, in cases like this, we do
+// have another type of mutex called an RWMutex.
+
+// So only one task is going to be able to work within code that's guarded by
+// the Lock and the Unlock, including readers. So when we're between Lock and
+// Unlock, we are guaranteed that there are no readers and only one writer to
+// the shared memory. Now when I want to inform the mutex that I want to read
+// from the shared memory, then I can use the RLock and RUnlock methods. So,
+// that's going to allow multiple readers to acquire that read lock, but when
+// something stops on line 50 and it's trying to write, then the mutex is going
+// to clear out all of those readers, let them finish their operations, then
+// it's going to let the writer come in, make its update, and when the Unlock
+// method is called then it's going to open the mutex up, and then it's going
+// to allow multiple readers to access the protected memory again.
+
